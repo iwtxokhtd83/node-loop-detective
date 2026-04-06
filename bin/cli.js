@@ -15,6 +15,7 @@ function parseCliArgs(argv) {
     threshold: '50',
     interval: '100',
     'io-threshold': '500',
+    'no-io': false,
     json: false,
     watch: false,
     help: false,
@@ -33,6 +34,7 @@ function parseCliArgs(argv) {
   const boolMap = {
     '-j': 'json', '--json': 'json',
     '-w': 'watch', '--watch': 'watch',
+    '--no-io': 'no-io',
     '-h': 'help', '--help': 'help',
     '-v': 'version', '--version': 'version',
   };
@@ -93,6 +95,7 @@ function printUsage() {
     -t, --threshold <ms>     Event loop lag threshold in ms (default: 50)
     -i, --interval <ms>      Sampling interval in ms (default: 100)
     --io-threshold <ms>      Slow I/O threshold in ms (default: 500)
+    --no-io                  Disable async I/O tracking
     -j, --json               Output results as JSON
     -w, --watch              Continuous monitoring mode
     -h, --help               Show this help
@@ -121,6 +124,7 @@ async function main() {
     threshold: parseInt(values.threshold, 10),
     interval: parseInt(values.interval, 10),
     ioThreshold: parseInt(values['io-threshold'], 10),
+    noIO: values['no-io'],
     watch: values.watch,
     json: values.json,
   };

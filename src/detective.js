@@ -427,7 +427,9 @@ class Detective extends EventEmitter {
     try {
       // Step 3: Start lag detection + async I/O tracking
       await this._startLagDetection();
-      await this._startAsyncIOTracking();
+      if (!this.config.noIO) {
+        await this._startAsyncIOTracking();
+      }
 
       // Step 4: Capture CPU profile
       const profile = await this._captureProfile(this.config.duration);
@@ -442,7 +444,9 @@ class Detective extends EventEmitter {
 
   async _watchMode() {
     await this._startLagDetection();
-    await this._startAsyncIOTracking();
+    if (!this.config.noIO) {
+      await this._startAsyncIOTracking();
+    }
 
     const runCycle = async () => {
       if (!this._running) return;
