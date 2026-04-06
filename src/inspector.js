@@ -64,7 +64,8 @@ class Inspector extends EventEmitter {
       this.ws.on('message', (data) => {
         const msg = JSON.parse(data.toString());
         if (msg.id !== undefined && this._callbacks.has(msg.id)) {
-          const { resolve, reject } = this._callbacks.get(msg.id);
+          const { resolve, reject, timer } = this._callbacks.get(msg.id);
+          clearTimeout(timer);
           this._callbacks.delete(msg.id);
           if (msg.error) {
             reject(new Error(msg.error.message));
@@ -98,16 +99,15 @@ class Inspector extends EventEmitter {
     const id = ++this._id;
 
     return new Promise((resolve, reject) => {
-      this._callbacks.set(id, { resolve, reject });
-      this.ws.send(JSON.stringify({ id, method, params }));
-
-      // Timeout for individual commands
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (this._callbacks.has(id)) {
           this._callbacks.delete(id);
           reject(new Error(`CDP command timeout: ${method}`));
         }
       }, 30000);
+
+      this._callbacks.set(id, { resolve, reject, timer });
+      this.ws.send(JSON.stringify({ id, method, params }));
     });
   }
 
@@ -116,6 +116,11 @@ class Inspector extends EventEmitter {
    */
   async disconnect() {
     if (this.ws) {
+      // Clear all pending timeouts and reject pending callbacks
+      for (const { reject, timer } of this._callbacks.values()) {
+        clearTimeout(timer);
+        reject(new Error('Inspector disconnected'));
+      }
       this._callbacks.clear();
       this.ws.close();
       this.ws = null;
