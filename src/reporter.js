@@ -33,6 +33,11 @@ class Reporter {
     if (this.config.json) return;
     const severity = data.lag > 500 ? COLORS.red : data.lag > 200 ? COLORS.yellow : COLORS.cyan;
     this._print(`${severity}⚠ Event loop lag: ${data.lag}ms${COLORS.reset} ${COLORS.dim}at ${new Date(data.timestamp).toISOString()}${COLORS.reset}`);
+    if (data.stack && data.stack.length > 0) {
+      for (const frame of data.stack.slice(0, 5)) {
+        this._print(`  ${COLORS.dim}  → ${frame.fn} ${frame.file}:${frame.line}:${frame.col}${COLORS.reset}`);
+      }
+    }
   }
 
   onProfile(analysis) {
@@ -143,6 +148,29 @@ class Reporter {
       this._print(`    Events: ${this.lagEvents.length}`);
       this._print(`    Max:    ${maxLag}ms`);
       this._print(`    Avg:    ${avgLag}ms`);
+
+      // Aggregate lag by code location
+      const locationMap = new Map();
+      for (const evt of this.lagEvents) {
+        if (evt.stack && evt.stack.length > 0) {
+          const top = evt.stack[0];
+          const key = `${top.fn} ${top.file}:${top.line}`;
+          const entry = locationMap.get(key) || { count: 0, totalLag: 0, maxLag: 0, frame: top };
+          entry.count++;
+          entry.totalLag += evt.lag;
+          entry.maxLag = Math.max(entry.maxLag, evt.lag);
+          locationMap.set(key, entry);
+        }
+      }
+
+      if (locationMap.size > 0) {
+        this._print(`\n    ${COLORS.bold}Lag by Code Location:${COLORS.reset}`);
+        const sorted = [...locationMap.values()].sort((a, b) => b.totalLag - a.totalLag);
+        for (const loc of sorted.slice(0, 5)) {
+          this._print(`    ${COLORS.yellow}${loc.frame.fn}${COLORS.reset} ${COLORS.dim}${loc.frame.file}:${loc.frame.line}${COLORS.reset}`);
+          this._print(`      ${loc.count} events, total ${loc.totalLag}ms, max ${loc.maxLag}ms`);
+        }
+      }
     }
 
     this._print(`\n${'─'.repeat(60)}\n`);

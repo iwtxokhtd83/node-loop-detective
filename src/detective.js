@@ -56,7 +56,7 @@ class Detective extends EventEmitter {
    * We inject a tiny lag-measuring snippet into the target process
    */
   async _startLagDetection() {
-    // Inject a lag detector into the target process
+    // Inject a lag detector that also captures stack traces
     const script = `
       (function() {
         if (globalThis.__loopDetective) {
@@ -66,12 +66,33 @@ class Detective extends EventEmitter {
         let lastTime = Date.now();
         const threshold = ${this.config.threshold};
 
+        // Capture stack trace at the point of lag detection
+        function captureStack() {
+          const orig = Error.stackTraceLimit;
+          Error.stackTraceLimit = 20;
+          const err = new Error();
+          Error.stackTraceLimit = orig;
+          // Parse the stack into structured frames
+          const frames = (err.stack || '').split('\\n').slice(2).map(line => {
+            const m = line.match(/at\\s+(?:(.+?)\\s+\\()?(.+?):(\\d+):(\\d+)\\)?/);
+            if (m) return { fn: m[1] || '(anonymous)', file: m[2], line: +m[3], col: +m[4] };
+            const m2 = line.match(/at\\s+(.+)/);
+            if (m2) return { fn: m2[1], file: '', line: 0, col: 0 };
+            return null;
+          }).filter(Boolean).filter(f =>
+            !f.file.includes('loopDetective') &&
+            !f.fn.includes('Timeout.') &&
+            !f.file.includes('node:internal')
+          );
+          return frames;
+        }
+
         const timer = setInterval(() => {
           const now = Date.now();
           const delta = now - lastTime;
           const lag = delta - ${this.config.interval};
           if (lag > threshold) {
-            lags.push({ lag, timestamp: now });
+            lags.push({ lag, timestamp: now, stack: captureStack() });
             if (lags.length > 100) lags.shift();
           }
           lastTime = now;
