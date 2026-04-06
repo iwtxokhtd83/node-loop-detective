@@ -2,32 +2,58 @@
 
 'use strict';
 
-const { parseArgs } = require('node:util');
 const { Detective } = require('../src/detective');
 const { Reporter } = require('../src/reporter');
 
-const options = {
-  pid: { type: 'string', short: 'p' },
-  port: { type: 'string', short: 'P', default: '' },
-  duration: { type: 'string', short: 'd', default: '10' },
-  threshold: { type: 'string', short: 't', default: '50' },
-  interval: { type: 'string', short: 'i', default: '100' },
-  json: { type: 'boolean', short: 'j', default: false },
-  watch: { type: 'boolean', short: 'w', default: false },
-  help: { type: 'boolean', short: 'h', default: false },
-  version: { type: 'boolean', short: 'v', default: false },
-};
+// Simple arg parser compatible with Node.js 16+
+function parseCliArgs(argv) {
+  const args = argv.slice(2);
+  const values = {
+    pid: null,
+    port: null,
+    duration: '10',
+    threshold: '50',
+    interval: '100',
+    json: false,
+    watch: false,
+    help: false,
+    version: false,
+  };
+  const positionals = [];
 
-let parsed;
-try {
-  parsed = parseArgs({ options, allowPositionals: true });
-} catch (err) {
-  console.error(`Error: ${err.message}\n`);
-  printUsage();
-  process.exit(1);
+  const flagMap = {
+    '-p': 'pid', '--pid': 'pid',
+    '-P': 'port', '--port': 'port',
+    '-d': 'duration', '--duration': 'duration',
+    '-t': 'threshold', '--threshold': 'threshold',
+    '-i': 'interval', '--interval': 'interval',
+  };
+  const boolMap = {
+    '-j': 'json', '--json': 'json',
+    '-w': 'watch', '--watch': 'watch',
+    '-h': 'help', '--help': 'help',
+    '-v': 'version', '--version': 'version',
+  };
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (flagMap[arg]) {
+      values[flagMap[arg]] = args[++i] || '';
+    } else if (boolMap[arg]) {
+      values[boolMap[arg]] = true;
+    } else if (!arg.startsWith('-')) {
+      positionals.push(arg);
+    } else {
+      console.error(`Unknown option: ${arg}\n`);
+      printUsage();
+      process.exit(1);
+    }
+  }
+
+  return { values, positionals };
 }
 
-const { values, positionals } = parsed;
+const { values, positionals } = parseCliArgs(process.argv);
 
 if (values.version) {
   const pkg = require('../package.json');
