@@ -12,6 +12,7 @@ class Detective extends EventEmitter {
     this.analyzer = new Analyzer(config);
     this._running = false;
     this._lagTimer = null;
+    this._ioTimer = null;
   }
 
   /**
@@ -145,6 +146,224 @@ class Detective extends EventEmitter {
   }
 
   /**
+   * Start slow async I/O detection via CDP Runtime.evaluate
+   * Monkey-patches http, https, net, dns to track slow operations
+   */
+  async _startAsyncIOTracking() {
+    const ioThreshold = this.config.ioThreshold || 500;
+
+    const script = `
+      (function() {
+        if (globalThis.__loopDetectiveIO) {
+          return { alreadyRunning: true };
+        }
+
+        const slowOps = [];
+        const threshold = ${ioThreshold};
+
+        // --- Track outgoing HTTP/HTTPS requests ---
+        function patchHttp(modName) {
+          let mod;
+          try { mod = require(modName); } catch { return; }
+          const origRequest = mod.request;
+          const origGet = mod.get;
+
+          mod.request = function patchedRequest(...args) {
+            const startTime = Date.now();
+            const opts = typeof args[0] === 'string' ? { href: args[0] } : (args[0] || {});
+            const target = opts.href || opts.hostname || opts.host || 'unknown';
+            const method = (opts.method || 'GET').toUpperCase();
+            const label = modName + ' ' + method + ' ' + target;
+
+            // Capture caller stack
+            const origLimit = Error.stackTraceLimit;
+            Error.stackTraceLimit = 10;
+            const stackErr = new Error();
+            Error.stackTraceLimit = origLimit;
+            const callerStack = (stackErr.stack || '').split('\\n').slice(2, 6).map(l => l.trim());
+
+            const req = origRequest.apply(this, args);
+
+            req.on('response', (res) => {
+              const duration = Date.now() - startTime;
+              if (duration >= threshold) {
+                slowOps.push({
+                  type: 'http',
+                  protocol: modName,
+                  method,
+                  target,
+                  statusCode: res.statusCode,
+                  duration,
+                  timestamp: Date.now(),
+                  stack: callerStack,
+                });
+                if (slowOps.length > 200) slowOps.shift();
+              }
+            });
+
+            req.on('error', (err) => {
+              const duration = Date.now() - startTime;
+              if (duration >= threshold) {
+                slowOps.push({
+                  type: 'http',
+                  protocol: modName,
+                  method,
+                  target,
+                  error: err.message,
+                  duration,
+                  timestamp: Date.now(),
+                  stack: callerStack,
+                });
+                if (slowOps.length > 200) slowOps.shift();
+              }
+            });
+
+            return req;
+          };
+
+          mod.get = function patchedGet(...args) {
+            const req = mod.request(...args);
+            req.end();
+            return req;
+          };
+        }
+
+        patchHttp('http');
+        patchHttp('https');
+
+        // --- Track DNS lookups ---
+        (function patchDns() {
+          let dns;
+          try { dns = require('dns'); } catch { return; }
+          const origLookup = dns.lookup;
+
+          dns.lookup = function patchedLookup(hostname, options, callback) {
+            const startTime = Date.now();
+            if (typeof options === 'function') {
+              callback = options;
+              options = {};
+            }
+
+            const origLimit = Error.stackTraceLimit;
+            Error.stackTraceLimit = 10;
+            const stackErr = new Error();
+            Error.stackTraceLimit = origLimit;
+            const callerStack = (stackErr.stack || '').split('\\n').slice(2, 6).map(l => l.trim());
+
+            return origLookup.call(dns, hostname, options, function(err, address, family) {
+              const duration = Date.now() - startTime;
+              if (duration >= threshold) {
+                slowOps.push({
+                  type: 'dns',
+                  target: hostname,
+                  duration,
+                  error: err ? err.message : null,
+                  timestamp: Date.now(),
+                  stack: callerStack,
+                });
+                if (slowOps.length > 200) slowOps.shift();
+              }
+              if (callback) callback(err, address, family);
+            });
+          };
+        })();
+
+        // --- Track TCP socket connections ---
+        (function patchNet() {
+          let net;
+          try { net = require('net'); } catch { return; }
+          const origConnect = net.Socket.prototype.connect;
+
+          net.Socket.prototype.connect = function patchedConnect(...args) {
+            const startTime = Date.now();
+            const opts = typeof args[0] === 'object' ? args[0] : { port: args[0], host: args[1] };
+            const target = (opts.host || '127.0.0.1') + ':' + (opts.port || '?');
+
+            const origLimit = Error.stackTraceLimit;
+            Error.stackTraceLimit = 10;
+            const stackErr = new Error();
+            Error.stackTraceLimit = origLimit;
+            const callerStack = (stackErr.stack || '').split('\\n').slice(2, 6).map(l => l.trim());
+
+            this.once('connect', () => {
+              const duration = Date.now() - startTime;
+              if (duration >= threshold) {
+                slowOps.push({
+                  type: 'tcp',
+                  target,
+                  duration,
+                  timestamp: Date.now(),
+                  stack: callerStack,
+                });
+                if (slowOps.length > 200) slowOps.shift();
+              }
+            });
+
+            this.once('error', (err) => {
+              const duration = Date.now() - startTime;
+              if (duration >= threshold) {
+                slowOps.push({
+                  type: 'tcp',
+                  target,
+                  error: err.message,
+                  duration,
+                  timestamp: Date.now(),
+                  stack: callerStack,
+                });
+                if (slowOps.length > 200) slowOps.shift();
+              }
+            });
+
+            return origConnect.apply(this, args);
+          };
+        })();
+
+        globalThis.__loopDetectiveIO = {
+          getSlowOps: () => {
+            const result = slowOps.splice(0);
+            return result;
+          },
+          cleanup: () => {
+            // Note: we don't restore originals to avoid complexity.
+            // The patches become no-ops once threshold filtering removes them.
+            delete globalThis.__loopDetectiveIO;
+          }
+        };
+
+        return { started: true };
+      })()
+    `;
+
+    const result = await this.inspector.send('Runtime.evaluate', {
+      expression: script,
+      returnByValue: true,
+    });
+
+    if (result.exceptionDetails) {
+      // Non-fatal: IO tracking is optional
+      this.emit('error', new Error(`Failed to inject I/O tracker (non-fatal): ${JSON.stringify(result.exceptionDetails)}`));
+      return;
+    }
+
+    // Poll for slow I/O events
+    this._ioTimer = setInterval(async () => {
+      if (!this._running) return;
+      try {
+        const pollResult = await this.inspector.send('Runtime.evaluate', {
+          expression: 'globalThis.__loopDetectiveIO ? globalThis.__loopDetectiveIO.getSlowOps() : []',
+          returnByValue: true,
+        });
+        const ops = pollResult.result?.value || [];
+        for (const op of ops) {
+          this.emit('slowIO', op);
+        }
+      } catch {
+        // Inspector may have disconnected
+      }
+    }, 1000);
+  }
+
+  /**
    * Take a CPU profile to identify blocking code
    */
   async _captureProfile(duration) {
@@ -161,12 +380,20 @@ class Detective extends EventEmitter {
   }
 
   /**
-   * Clean up the injected lag detector
+   * Clean up the injected lag detector and I/O tracker
    */
   async _cleanupLagDetector() {
     try {
       await this.inspector.send('Runtime.evaluate', {
         expression: 'globalThis.__loopDetective && globalThis.__loopDetective.cleanup()',
+        returnByValue: true,
+      });
+    } catch {
+      // Best effort cleanup
+    }
+    try {
+      await this.inspector.send('Runtime.evaluate', {
+        expression: 'globalThis.__loopDetectiveIO && globalThis.__loopDetectiveIO.cleanup()',
         returnByValue: true,
       });
     } catch {
@@ -198,8 +425,9 @@ class Detective extends EventEmitter {
 
   async _singleRun() {
     try {
-      // Step 3: Start lag detection
+      // Step 3: Start lag detection + async I/O tracking
       await this._startLagDetection();
+      await this._startAsyncIOTracking();
 
       // Step 4: Capture CPU profile
       const profile = await this._captureProfile(this.config.duration);
@@ -214,6 +442,7 @@ class Detective extends EventEmitter {
 
   async _watchMode() {
     await this._startLagDetection();
+    await this._startAsyncIOTracking();
 
     const runCycle = async () => {
       if (!this._running) return;
@@ -239,6 +468,11 @@ class Detective extends EventEmitter {
     if (this._lagTimer) {
       clearInterval(this._lagTimer);
       this._lagTimer = null;
+    }
+
+    if (this._ioTimer) {
+      clearInterval(this._ioTimer);
+      this._ioTimer = null;
     }
 
     if (this.inspector) {

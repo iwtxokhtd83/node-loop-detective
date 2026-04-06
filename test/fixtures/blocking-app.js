@@ -39,7 +39,19 @@ function heavyRegex() {
   }
 }
 
-const server = http.createServer((req, res) => {
+// Simulate slow external HTTP call
+function slowHttpCall() {
+  return new Promise((resolve) => {
+    const req = http.get('http://httpbin.org/delay/2', (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => resolve(data));
+    });
+    req.on('error', () => resolve('error'));
+  });
+}
+
+const server = http.createServer(async (req, res) => {
   if (req.url === '/block') {
     const result = heavyComputation();
     res.end(`Computed: ${result}\n`);
@@ -49,6 +61,9 @@ const server = http.createServer((req, res) => {
   } else if (req.url === '/regex') {
     heavyRegex();
     res.end('Regex done\n');
+  } else if (req.url === '/slow-http') {
+    const data = await slowHttpCall();
+    res.end(`External call done: ${data.length} bytes\n`);
   } else {
     res.end('OK\n');
   }
@@ -57,7 +72,7 @@ const server = http.createServer((req, res) => {
 const port = process.env.PORT || 3333;
 server.listen(port, () => {
   console.log(`Blocking test app running on port ${port} (PID: ${process.pid})`);
-  console.log('Endpoints: /block, /json, /regex');
+  console.log('Endpoints: /block, /json, /regex, /slow-http');
 
   // Periodically do some blocking work to make profiling interesting
   setInterval(() => {

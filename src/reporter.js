@@ -20,6 +20,7 @@ class Reporter {
   constructor(config) {
     this.config = config;
     this.lagEvents = [];
+    this.slowIOEvents = [];
   }
 
   onConnected() {
@@ -40,10 +41,29 @@ class Reporter {
     }
   }
 
+  onSlowIO(data) {
+    this.slowIOEvents.push(data);
+    if (this.config.json) return;
+    const severity = data.duration > 5000 ? COLORS.red : data.duration > 2000 ? COLORS.yellow : COLORS.magenta;
+    const icon = data.type === 'http' ? '🌐' : data.type === 'dns' ? '🔍' : '🔌';
+    const detail = data.type === 'http'
+      ? `${data.method} ${data.target} → ${data.statusCode || data.error || '?'}`
+      : data.type === 'dns'
+      ? `lookup ${data.target}${data.error ? ' (' + data.error + ')' : ''}`
+      : `connect ${data.target}${data.error ? ' (' + data.error + ')' : ''}`;
+    this._print(`${severity}${icon} Slow ${data.type.toUpperCase()}: ${data.duration}ms${COLORS.reset} ${detail}`);
+    if (data.stack && data.stack.length > 0) {
+      for (const line of data.stack.slice(0, 3)) {
+        this._print(`  ${COLORS.dim}  ${line}${COLORS.reset}`);
+      }
+    }
+  }
+
   onProfile(analysis) {
     if (this.config.json) {
-      this._print(JSON.stringify({ ...analysis, lagEvents: this.lagEvents }, null, 2));
+      this._print(JSON.stringify({ ...analysis, lagEvents: this.lagEvents, slowIOEvents: this.slowIOEvents }, null, 2));
       this.lagEvents = [];
+      this.slowIOEvents = [];
       return;
     }
 
@@ -51,9 +71,11 @@ class Reporter {
     this._printPatterns(analysis.blockingPatterns);
     this._printHeavyFunctions(analysis.heavyFunctions);
     this._printCallStacks(analysis.callStacks);
+    this._printSlowIOSummary();
     this._printLagSummary();
 
     this.lagEvents = [];
+    this.slowIOEvents = [];
   }
 
   onError(err) {
@@ -134,6 +156,53 @@ class Reporter {
         const isTarget = frame.functionName === s.target;
         const color = isTarget ? COLORS.yellow : COLORS.dim;
         this._print(`${indent}${color}${isTarget ? '→' : '│'} ${frame.functionName} ${frame.url}:${frame.lineNumber}${COLORS.reset}`);
+      }
+    }
+  }
+
+  _printSlowIOSummary() {
+    if (this.slowIOEvents.length === 0) {
+      this._print(`\n  ${COLORS.green}✔ No slow I/O operations detected${COLORS.reset}`);
+      return;
+    }
+
+    this._print(`\n  ${COLORS.magenta}⚠ Slow Async I/O Summary${COLORS.reset}`);
+    this._print(`    Total slow ops: ${this.slowIOEvents.length}`);
+
+    // Group by type
+    const byType = {};
+    for (const op of this.slowIOEvents) {
+      if (!byType[op.type]) byType[op.type] = [];
+      byType[op.type].push(op);
+    }
+
+    for (const [type, ops] of Object.entries(byType)) {
+      const icon = type === 'http' ? '🌐' : type === 'dns' ? '🔍' : '🔌';
+      const maxDur = Math.max(...ops.map(o => o.duration));
+      const avgDur = Math.round(ops.reduce((s, o) => s + o.duration, 0) / ops.length);
+      this._print(`\n    ${icon} ${COLORS.bold}${type.toUpperCase()}${COLORS.reset} — ${ops.length} slow ops, avg ${avgDur}ms, max ${maxDur}ms`);
+
+      // Group by target
+      const byTarget = {};
+      for (const op of ops) {
+        const key = op.type === 'http' ? `${op.method} ${op.target}` : op.target;
+        if (!byTarget[key]) byTarget[key] = { count: 0, totalDuration: 0, maxDuration: 0, errors: 0, stack: op.stack };
+        byTarget[key].count++;
+        byTarget[key].totalDuration += op.duration;
+        byTarget[key].maxDuration = Math.max(byTarget[key].maxDuration, op.duration);
+        if (op.error) byTarget[key].errors++;
+      }
+
+      const sorted = Object.entries(byTarget).sort((a, b) => b[1].totalDuration - a[1].totalDuration);
+      for (const [target, stats] of sorted.slice(0, 5)) {
+        const errStr = stats.errors > 0 ? ` ${COLORS.red}(${stats.errors} errors)${COLORS.reset}` : '';
+        this._print(`      ${COLORS.yellow}${target}${COLORS.reset}${errStr}`);
+        this._print(`        ${stats.count} calls, total ${stats.totalDuration}ms, avg ${Math.round(stats.totalDuration / stats.count)}ms, max ${stats.maxDuration}ms`);
+        if (stats.stack && stats.stack.length > 0) {
+          for (const line of stats.stack.slice(0, 2)) {
+            this._print(`        ${COLORS.dim}${line}${COLORS.reset}`);
+          }
+        }
       }
     }
   }

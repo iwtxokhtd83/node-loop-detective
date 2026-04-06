@@ -1,6 +1,6 @@
 # node-loop-detective 🔍
 
-Detect event loop blocking & lag in **running** Node.js apps — without code changes or restarts.
+Detect event loop blocking, lag, and slow async I/O in **running** Node.js apps — without code changes or restarts.
 
 ```
 $ loop-detective 12345
@@ -10,6 +10,8 @@ $ loop-detective 12345
 
 ⚠ Event loop lag: 312ms at 2025-01-15T10:23:45.123Z
 ⚠ Event loop lag: 156ms at 2025-01-15T10:23:48.456Z
+🌐 Slow HTTP: 2340ms GET api.example.com/users → 200
+🔌 Slow TCP: 1520ms db-server:3306
 
 ────────────────────────────────────────────────────────────
   Event Loop Detective Report
@@ -28,6 +30,17 @@ $ loop-detective 12345
    1. heavyComputation
       ██████████████░░░░░░ 6245ms (62.3%)
       /app/server.js:42:1
+
+  ⚠ Slow Async I/O Summary
+    Total slow ops: 3
+
+    🌐 HTTP — 2 slow ops, avg 1800ms, max 2340ms
+      GET api.example.com/users
+        2 calls, total 3600ms, avg 1800ms, max 2340ms
+
+    🔌 TCP — 1 slow ops, avg 1520ms, max 1520ms
+      db-server:3306
+        1 calls, total 1520ms, max 1520ms
 ```
 
 ## How It Works
@@ -35,9 +48,10 @@ $ loop-detective 12345
 1. Sends `SIGUSR1` to activate the Node.js built-in inspector (or connects to `--port`)
 2. Connects via Chrome DevTools Protocol (CDP)
 3. Injects a lightweight event loop lag monitor
-4. Captures a CPU profile to identify blocking code
-5. Analyzes the profile for common blocking patterns
-6. Disconnects cleanly — minimal impact on your running app
+4. Tracks slow async I/O (HTTP, DNS, TCP) via monkey-patching
+5. Captures a CPU profile to identify blocking code
+6. Analyzes the profile for common blocking patterns
+7. Disconnects cleanly — minimal impact on your running app
 
 ## Install
 
@@ -57,6 +71,9 @@ loop-detective --port 9229
 # Profile for 30 seconds with 100ms lag threshold
 loop-detective -p 12345 -d 30 -t 100
 
+# Detect slow I/O with a 1-second threshold
+loop-detective -p 12345 --io-threshold 1000
+
 # Continuous monitoring mode
 loop-detective -p 12345 --watch
 
@@ -73,10 +90,13 @@ loop-detective -p 12345 --json
 | `-d, --duration <sec>` | Profiling duration in seconds | 10 |
 | `-t, --threshold <ms>` | Event loop lag threshold | 50 |
 | `-i, --interval <ms>` | Lag sampling interval | 100 |
+| `--io-threshold <ms>` | Slow I/O threshold | 500 |
 | `-j, --json` | Output as JSON | false |
 | `-w, --watch` | Continuous monitoring | false |
 
 ## What It Detects
+
+### CPU / Event Loop Blocking
 
 | Pattern | Description |
 |---------|-------------|
@@ -86,6 +106,16 @@ loop-detective -p 12345 --json
 | `gc-pressure` | High garbage collection time |
 | `sync-io` | Synchronous file I/O calls |
 | `crypto-heavy` | CPU-intensive crypto operations |
+
+### Slow Async I/O
+
+| Type | What It Tracks |
+|------|---------------|
+| 🌐 HTTP/HTTPS | Outgoing HTTP requests — method, target, status code, duration |
+| 🔍 DNS | DNS lookups — hostname, resolution time |
+| 🔌 TCP | TCP connections — target host:port, connect time (covers databases, Redis, etc.) |
+
+Each slow I/O event includes the caller stack trace, so you know exactly which code initiated the slow operation.
 
 ## Programmatic API
 
@@ -97,9 +127,11 @@ const detective = new Detective({
   duration: 10000,
   threshold: 50,
   interval: 100,
+  ioThreshold: 500,
 });
 
 detective.on('lag', (data) => console.log('Lag:', data.lag, 'ms'));
+detective.on('slowIO', (data) => console.log('Slow I/O:', data.type, data.target, data.duration, 'ms'));
 detective.on('profile', (analysis) => {
   console.log('Heavy functions:', analysis.heavyFunctions);
   console.log('Patterns:', analysis.blockingPatterns);
@@ -117,7 +149,7 @@ await detective.start();
 
 ## How is this different from clinic.js / 0x?
 
-Those are great tools, but they require you to **start** your app through them. `loop-detective` attaches to an **already running** process — perfect for production debugging.
+Those are great tools, but they require you to **start** your app through them. `loop-detective` attaches to an **already running** process — perfect for production debugging. It also tracks slow async I/O (HTTP, DNS, TCP) which those tools don't focus on.
 
 ## License
 
