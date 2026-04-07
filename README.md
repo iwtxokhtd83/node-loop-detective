@@ -74,6 +74,9 @@ loop-detective -p 12345 -d 30 -t 100
 # Detect slow I/O with a 1-second threshold
 loop-detective -p 12345 --io-threshold 1000
 
+# Connect to a remote inspector (Docker, K8s, remote server)
+loop-detective --host 192.168.1.100 --port 9229
+
 # Continuous monitoring mode
 loop-detective -p 12345 --watch
 
@@ -86,6 +89,7 @@ loop-detective -p 12345 --json
 | Flag | Description | Default |
 |------|-------------|---------|
 | `-p, --pid <pid>` | Target Node.js process ID | — |
+| `-H, --host <host>` | Inspector host (remote connections) | 127.0.0.1 |
 | `-P, --port <port>` | Inspector port (skip SIGUSR1) | — |
 | `-d, --duration <sec>` | Profiling duration in seconds | 10 |
 | `-t, --threshold <ms>` | Event loop lag threshold | 50 |
@@ -124,6 +128,7 @@ const { Detective } = require('node-loop-detective');
 
 const detective = new Detective({
   pid: 12345,
+  inspectorHost: '127.0.0.1',  // or remote host
   duration: 10000,
   threshold: 50,
   interval: 100,

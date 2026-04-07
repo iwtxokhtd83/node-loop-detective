@@ -10,6 +10,7 @@ function parseCliArgs(argv) {
   const args = argv.slice(2);
   const values = {
     pid: null,
+    host: null,
     port: null,
     duration: '10',
     threshold: '50',
@@ -24,6 +25,7 @@ function parseCliArgs(argv) {
 
   const flagMap = {
     '-p': 'pid', '--pid': 'pid',
+    '-H': 'host', '--host': 'host',
     '-P': 'port', '--port': 'port',
     '-d': 'duration', '--duration': 'duration',
     '-t': 'threshold', '--threshold': 'threshold',
@@ -85,9 +87,11 @@ function printUsage() {
     loop-detective <pid>
     loop-detective --pid <pid>
     loop-detective --port <inspector-port>
+    loop-detective --host <remote-host> --port <inspector-port>
 
   OPTIONS
     -p, --pid <pid>          Target Node.js process ID
+    -H, --host <host>        Inspector host (default: 127.0.0.1)
     -P, --port <port>        Connect to an already-open inspector port
     -d, --duration <sec>     Profiling duration in seconds (default: 10)
     -t, --threshold <ms>     Event loop lag threshold in ms (default: 50)
@@ -102,6 +106,7 @@ function printUsage() {
     loop-detective 12345
     loop-detective --pid 12345 --duration 30 --threshold 100
     loop-detective --port 9229 --watch
+    loop-detective --host 192.168.1.100 --port 9229
     loop-detective -p 12345 -d 5 -j
 
   HOW IT WORKS
@@ -116,6 +121,7 @@ function printUsage() {
 async function main() {
   const config = {
     pid: pid ? parseInt(pid, 10) : null,
+    inspectorHost: values.host || '127.0.0.1',
     inspectorPort,
     duration: parseInt(values.duration, 10) * 1000,
     threshold: parseInt(values.threshold, 10),
@@ -127,6 +133,11 @@ async function main() {
 
   const reporter = new Reporter(config);
   const detective = new Detective(config);
+
+  // Security warning for remote connections
+  if (config.inspectorHost !== '127.0.0.1' && config.inspectorHost !== 'localhost') {
+    reporter.onInfo(`⚠ Warning: Connecting to remote host ${config.inspectorHost}. The CDP protocol has no authentication — ensure the network is trusted.`);
+  }
 
   detective.on('connected', () => reporter.onConnected());
   detective.on('lag', (data) => reporter.onLag(data));

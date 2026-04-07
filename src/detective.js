@@ -406,7 +406,7 @@ class Detective extends EventEmitter {
     this._activateInspector();
     const port = await this._findInspectorPort();
 
-    this.inspector = new Inspector({ port });
+    this.inspector = new Inspector({ host: this.config.inspectorHost, port });
     await this.inspector.connect();
     this.emit('connected');
 
