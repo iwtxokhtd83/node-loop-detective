@@ -424,7 +424,7 @@ class Detective extends EventEmitter {
 
       const profile = await this._captureProfile(this.config.duration);
       const analysis = this.analyzer.analyzeProfile(profile);
-      this.emit('profile', analysis);
+      this.emit('profile', analysis, profile);
     } finally {
       await this.stop();
     }
@@ -444,7 +444,7 @@ class Detective extends EventEmitter {
       try {
         const profile = await this._captureProfile(this.config.duration);
         const analysis = this.analyzer.analyzeProfile(profile);
-        this.emit('profile', analysis);
+        this.emit('profile', analysis, profile);
       } catch (err) {
         this.emit('error', err);
       }

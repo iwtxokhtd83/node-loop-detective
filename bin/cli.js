@@ -4,6 +4,8 @@
 
 const { Detective } = require('../src/detective');
 const { Reporter } = require('../src/reporter');
+const fs = require('node:fs');
+const path = require('node:path');
 
 // Simple arg parser compatible with Node.js 16+
 function parseCliArgs(argv) {
@@ -16,6 +18,7 @@ function parseCliArgs(argv) {
     threshold: '50',
     interval: '100',
     'io-threshold': '500',
+    'save-profile': null,
     json: false,
     watch: false,
     help: false,
@@ -31,6 +34,7 @@ function parseCliArgs(argv) {
     '-t': 'threshold', '--threshold': 'threshold',
     '-i': 'interval', '--interval': 'interval',
     '--io-threshold': 'io-threshold',
+    '--save-profile': 'save-profile',
   };
   const boolMap = {
     '-j': 'json', '--json': 'json',
@@ -97,6 +101,7 @@ function printUsage() {
     -t, --threshold <ms>     Event loop lag threshold in ms (default: 50)
     -i, --interval <ms>      Sampling interval in ms (default: 100)
     --io-threshold <ms>      Slow I/O threshold in ms (default: 500)
+    --save-profile <path>    Save raw CPU profile to .cpuprofile file
     -j, --json               Output results as JSON
     -w, --watch              Continuous monitoring mode
     -h, --help               Show this help
@@ -127,6 +132,7 @@ async function main() {
     threshold: parseInt(values.threshold, 10),
     interval: parseInt(values.interval, 10),
     ioThreshold: parseInt(values['io-threshold'], 10),
+    saveProfile: values['save-profile'],
     watch: values.watch,
     json: values.json,
   };
@@ -142,7 +148,24 @@ async function main() {
   detective.on('connected', () => reporter.onConnected());
   detective.on('lag', (data) => reporter.onLag(data));
   detective.on('slowIO', (data) => reporter.onSlowIO(data));
-  detective.on('profile', (data) => reporter.onProfile(data));
+  detective.on('profile', (analysis, rawProfile) => {
+    reporter.onProfile(analysis);
+
+    // Save raw CPU profile if requested
+    if (config.saveProfile && rawProfile) {
+      try {
+        const filePath = path.resolve(config.saveProfile);
+        fs.writeFileSync(filePath, JSON.stringify(rawProfile));
+        if (!config.json) {
+          console.log(`\n  \x1b[32m✔\x1b[0m CPU profile saved to ${filePath}`);
+          console.log(`    Open in Chrome DevTools: Performance tab → Load profile`);
+          console.log(`    Or visit https://www.speedscope.app\n`);
+        }
+      } catch (err) {
+        console.error(`\n  \x1b[31m✖ Failed to save profile: ${err.message}\x1b[0m\n`);
+      }
+    }
+  });
   detective.on('error', (err) => reporter.onError(err));
   detective.on('disconnected', () => reporter.onDisconnected());
 

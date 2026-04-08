@@ -77,6 +77,9 @@ loop-detective -p 12345 --io-threshold 1000
 # Connect to a remote inspector (Docker, K8s, remote server)
 loop-detective --host 192.168.1.100 --port 9229
 
+# Save raw CPU profile for Chrome DevTools / speedscope
+loop-detective -p 12345 --save-profile ./profile.cpuprofile
+
 # Continuous monitoring mode
 loop-detective -p 12345 --watch
 
@@ -95,6 +98,7 @@ loop-detective -p 12345 --json
 | `-t, --threshold <ms>` | Event loop lag threshold | 50 |
 | `-i, --interval <ms>` | Lag sampling interval | 100 |
 | `--io-threshold <ms>` | Slow I/O threshold | 500 |
+| `--save-profile <path>` | Save raw CPU profile to file | — |
 | `-j, --json` | Output as JSON | false |
 | `-w, --watch` | Continuous monitoring | false |
 
