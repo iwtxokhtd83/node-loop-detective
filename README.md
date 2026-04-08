@@ -120,7 +120,8 @@ loop-detective -p 12345 --json
 | Type | What It Tracks |
 |------|---------------|
 | 🌐 HTTP/HTTPS | Outgoing HTTP requests — method, target, status code, duration |
-| 🔍 DNS | DNS lookups — hostname, resolution time |
+| 🌐 Fetch | Global `fetch()` calls (Node.js 18+) — method, target, status, duration |
+| 🔍 DNS | DNS lookups — callback and promise API (`dns.lookup` + `dns.promises.lookup`) |
 | 🔌 TCP | TCP connections — target host:port, connect time (covers databases, Redis, etc.) |
 
 Each slow I/O event includes the caller stack trace, so you know exactly which code initiated the slow operation.

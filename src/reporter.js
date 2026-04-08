@@ -45,8 +45,8 @@ class Reporter {
     this.slowIOEvents.push(data);
     if (this.config.json) return;
     const severity = data.duration > 5000 ? COLORS.red : data.duration > 2000 ? COLORS.yellow : COLORS.magenta;
-    const icon = data.type === 'http' ? '🌐' : data.type === 'dns' ? '🔍' : '🔌';
-    const detail = data.type === 'http'
+    const icon = data.type === 'http' ? '🌐' : data.type === 'fetch' ? '🌐' : data.type === 'dns' ? '🔍' : '🔌';
+    const detail = data.type === 'http' || data.type === 'fetch'
       ? `${data.method} ${data.target} → ${data.statusCode || data.error || '?'}`
       : data.type === 'dns'
       ? `lookup ${data.target}${data.error ? ' (' + data.error + ')' : ''}`
@@ -177,7 +177,7 @@ class Reporter {
     }
 
     for (const [type, ops] of Object.entries(byType)) {
-      const icon = type === 'http' ? '🌐' : type === 'dns' ? '🔍' : '🔌';
+      const icon = type === 'http' ? '🌐' : type === 'fetch' ? '🌐' : type === 'dns' ? '🔍' : '🔌';
       const maxDur = Math.max(...ops.map(o => o.duration));
       const avgDur = Math.round(ops.reduce((s, o) => s + o.duration, 0) / ops.length);
       this._print(`\n    ${icon} ${COLORS.bold}${type.toUpperCase()}${COLORS.reset} — ${ops.length} slow ops, avg ${avgDur}ms, max ${maxDur}ms`);
@@ -185,7 +185,7 @@ class Reporter {
       // Group by target
       const byTarget = {};
       for (const op of ops) {
-        const key = op.type === 'http' ? `${op.method} ${op.target}` : op.target;
+        const key = (op.type === 'http' || op.type === 'fetch') ? `${op.method} ${op.target}` : op.target;
         if (!byTarget[key]) byTarget[key] = { count: 0, totalDuration: 0, maxDuration: 0, errors: 0, stack: op.stack };
         byTarget[key].count++;
         byTarget[key].totalDuration += op.duration;

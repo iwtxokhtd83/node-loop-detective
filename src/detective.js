@@ -261,7 +261,7 @@ class Detective extends EventEmitter {
         patchHttp('http');
         patchHttp('https');
 
-        // --- Track DNS lookups ---
+        // --- Track DNS lookups (callback API) ---
         (function patchDns() {
           let dns;
           try { dns = require('dns'); } catch { return; }
@@ -287,6 +287,40 @@ class Detective extends EventEmitter {
               if (callback) callback(err, address, family);
             });
           };
+
+          // --- Track DNS lookups (promise API, Node.js 10.6+) ---
+          if (dns.promises && dns.promises.lookup) {
+            const origPromiseLookup = dns.promises.lookup;
+            originals['dns.promises.lookup'] = { mod: dns.promises, key: 'lookup', fn: origPromiseLookup };
+
+            dns.promises.lookup = function patchedPromiseLookup(hostname, options) {
+              const startTime = Date.now();
+              const callerStack = captureCallerStack();
+
+              return origPromiseLookup.call(dns.promises, hostname, options).then(
+                (result) => {
+                  const duration = Date.now() - startTime;
+                  if (duration >= threshold) {
+                    recordSlowOp({
+                      type: 'dns', target: hostname, duration,
+                      timestamp: Date.now(), stack: callerStack,
+                    });
+                  }
+                  return result;
+                },
+                (err) => {
+                  const duration = Date.now() - startTime;
+                  if (duration >= threshold) {
+                    recordSlowOp({
+                      type: 'dns', target: hostname, duration,
+                      error: err.message, timestamp: Date.now(), stack: callerStack,
+                    });
+                  }
+                  throw err;
+                }
+              );
+            };
+          }
         })();
 
         // --- Track TCP socket connections ---
@@ -320,10 +354,63 @@ class Detective extends EventEmitter {
           };
         })();
 
+        // --- Track global fetch() (Node.js 18+) ---
+        (function patchFetch() {
+          if (typeof globalThis.fetch !== 'function') return;
+          const origFetch = globalThis.fetch;
+          originals['globalThis.fetch'] = { mod: globalThis, key: 'fetch', fn: origFetch };
+
+          globalThis.fetch = function patchedFetch(input, init) {
+            const startTime = Date.now();
+            const callerStack = captureCallerStack();
+
+            // Extract target URL
+            let target = 'unknown';
+            let method = 'GET';
+            if (typeof input === 'string') {
+              target = input;
+            } else if (input && typeof input === 'object') {
+              target = input.url || input.href || String(input);
+              method = (input.method || 'GET').toUpperCase();
+            }
+            if (init && init.method) {
+              method = init.method.toUpperCase();
+            }
+            // Shorten target for display
+            try {
+              const u = new URL(target);
+              target = u.host + u.pathname;
+            } catch {}
+
+            return origFetch.call(this, input, init).then(
+              (res) => {
+                const duration = Date.now() - startTime;
+                if (duration >= threshold) {
+                  recordSlowOp({
+                    type: 'fetch', method, target,
+                    statusCode: res.status, duration, timestamp: Date.now(), stack: callerStack,
+                  });
+                }
+                return res;
+              },
+              (err) => {
+                const duration = Date.now() - startTime;
+                if (duration >= threshold) {
+                  recordSlowOp({
+                    type: 'fetch', method, target,
+                    error: err.message, duration, timestamp: Date.now(), stack: callerStack,
+                  });
+                }
+                throw err;
+              }
+            );
+          };
+        })();
+
         globalThis.__loopDetectiveIO = {
           getSlowOps: () => slowOps.splice(0),
           cleanup: () => {
-            // Fix #1: Restore all original functions
+            // Restore all original functions
             for (const entry of Object.values(originals)) {
               entry.mod[entry.key] = entry.fn;
             }
