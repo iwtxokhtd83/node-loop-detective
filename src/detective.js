@@ -14,6 +14,8 @@ class Detective extends EventEmitter {
     this._stopping = false;
     this._lagTimer = null;
     this._ioTimer = null;
+    this._sleepReject = null;
+    this._targetExited = false;
   }
 
   /**
@@ -450,19 +452,29 @@ class Detective extends EventEmitter {
   }
 
   /**
-   * Take a CPU profile to identify blocking code
+   * Take a CPU profile to identify blocking code.
+   * If the target exits during profiling, attempts to return null
+   * so callers can handle the partial-data case.
    */
   async _captureProfile(duration) {
     await this.inspector.send('Profiler.enable');
     await this.inspector.send('Profiler.setSamplingInterval', { interval: 100 });
     await this.inspector.send('Profiler.start');
 
-    await this._sleep(duration);
+    try {
+      await this._sleep(duration);
+    } catch {
+      // Sleep was cancelled (target exited) — fall through to try stopping the profiler
+    }
 
-    const { profile } = await this.inspector.send('Profiler.stop');
-    await this.inspector.send('Profiler.disable');
-
-    return profile;
+    try {
+      const { profile } = await this.inspector.send('Profiler.stop');
+      await this.inspector.send('Profiler.disable');
+      return profile;
+    } catch {
+      // Target exited before we could stop the profiler — no profile data available
+      return null;
+    }
   }
 
   /**
@@ -489,11 +501,27 @@ class Detective extends EventEmitter {
   async start() {
     this._running = true;
     this._stopping = false;
+    this._targetExited = false;
 
     this._activateInspector();
     const port = await this._findInspectorPort();
 
     this.inspector = new Inspector({ host: this.config.inspectorHost, port });
+
+    // Listen for unexpected disconnect (target process exit)
+    this.inspector.on('disconnected', () => {
+      if (!this._stopping) {
+        this._targetExited = true;
+        const pid = this.config.pid || 'unknown';
+        this.emit('targetExit', { pid, message: `Target process (PID ${pid}) exited during profiling` });
+        // Cancel any pending sleep so _captureProfile can finish
+        if (this._sleepReject) {
+          this._sleepReject(new Error('Target process exited'));
+          this._sleepReject = null;
+        }
+      }
+    });
+
     await this.inspector.connect();
     this.emit('connected');
 
@@ -512,8 +540,12 @@ class Detective extends EventEmitter {
       }
 
       const profile = await this._captureProfile(this.config.duration);
-      const analysis = this.analyzer.analyzeProfile(profile);
-      this.emit('profile', analysis, profile);
+
+      if (profile) {
+        const analysis = this.analyzer.analyzeProfile(profile);
+        this.emit('profile', analysis, profile);
+      }
+      // If profile is null, target exited — targetExit event already emitted
     } finally {
       await this.stop();
     }
@@ -534,13 +566,15 @@ class Detective extends EventEmitter {
 
       try {
         const profile = await this._captureProfile(this.config.duration);
-        const analysis = this.analyzer.analyzeProfile(profile);
-        this.emit('profile', analysis, profile);
+        if (profile) {
+          const analysis = this.analyzer.analyzeProfile(profile);
+          this.emit('profile', analysis, profile);
+        }
       } catch (err) {
         this.emit('error', err);
       }
 
-      if (this._running) {
+      if (this._running && !this._targetExited) {
         setTimeout(runCycle, 1000);
       }
     };
@@ -578,7 +612,14 @@ class Detective extends EventEmitter {
   }
 
   _sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise((resolve, reject) => {
+      this._sleepReject = reject;
+      const timer = setTimeout(() => {
+        this._sleepReject = null;
+        resolve();
+      }, ms);
+      if (timer.unref) timer.unref();
+    });
   }
 }
 

@@ -83,6 +83,12 @@ class Inspector extends EventEmitter {
       });
 
       this.ws.on('close', () => {
+        // Reject all pending callbacks — target is gone
+        for (const { reject, timer } of this._callbacks.values()) {
+          clearTimeout(timer);
+          try { reject(new Error('Target process exited')); } catch {}
+        }
+        this._callbacks.clear();
         this.emit('disconnected');
       });
     });

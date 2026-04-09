@@ -173,6 +173,18 @@ async function main() {
   detective.on('error', (err) => reporter.onError(err));
   detective.on('disconnected', () => reporter.onDisconnected());
 
+  let targetExited = false;
+
+  detective.on('targetExit', (data) => {
+    targetExited = true;
+    if (config.json) {
+      console.log(JSON.stringify({ targetExit: true, message: data.message }));
+    } else {
+      console.log('\n  \x1b[31m✖ ' + data.message + '\x1b[0m');
+      console.log('  \x1b[2m  Any lag or I/O events collected before the exit are shown above.\x1b[0m\n');
+    }
+  });
+
   process.on('SIGINT', async () => {
     reporter.onInfo('Shutting down...');
     await detective.stop();
@@ -181,6 +193,7 @@ async function main() {
 
   try {
     await detective.start();
+    process.exit(targetExited ? 2 : 0);
   } catch (err) {
     reporter.onError(err);
     process.exit(1);

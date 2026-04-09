@@ -48,10 +48,12 @@ $ loop-detective 12345
 1. Sends `SIGUSR1` to activate the Node.js built-in inspector (or connects to `--port`)
 2. Connects via Chrome DevTools Protocol (CDP)
 3. Injects a lightweight event loop lag monitor
-4. Tracks slow async I/O (HTTP, DNS, TCP) via monkey-patching
+4. Tracks slow async I/O (HTTP, DNS, TCP, fetch) via monkey-patching
 5. Captures a CPU profile to identify blocking code
 6. Analyzes the profile for common blocking patterns
 7. Disconnects cleanly — minimal impact on your running app
+
+If the target process exits during profiling, loop-detective detects it immediately, reports any lag/I/O events collected so far, and exits with code 2.
 
 ## Install
 
