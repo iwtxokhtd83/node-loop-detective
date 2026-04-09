@@ -19,6 +19,7 @@ function parseCliArgs(argv) {
     interval: '100',
     'io-threshold': '500',
     'save-profile': null,
+    'no-io': false,
     json: false,
     watch: false,
     help: false,
@@ -39,6 +40,7 @@ function parseCliArgs(argv) {
   const boolMap = {
     '-j': 'json', '--json': 'json',
     '-w': 'watch', '--watch': 'watch',
+    '--no-io': 'no-io',
     '-h': 'help', '--help': 'help',
     '-v': 'version', '--version': 'version',
   };
@@ -102,6 +104,7 @@ function printUsage() {
     -i, --interval <ms>      Sampling interval in ms (default: 100)
     --io-threshold <ms>      Slow I/O threshold in ms (default: 500)
     --save-profile <path>    Save raw CPU profile to .cpuprofile file
+    --no-io                  Disable async I/O tracking
     -j, --json               Output results as JSON
     -w, --watch              Continuous monitoring mode
     -h, --help               Show this help
@@ -133,6 +136,7 @@ async function main() {
     interval: parseInt(values.interval, 10),
     ioThreshold: parseInt(values['io-threshold'], 10),
     saveProfile: values['save-profile'],
+    noIO: values['no-io'],
     watch: values.watch,
     json: values.json,
   };

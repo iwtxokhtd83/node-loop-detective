@@ -99,6 +99,7 @@ loop-detective -p 12345 --json
 | `-i, --interval <ms>` | Lag sampling interval | 100 |
 | `--io-threshold <ms>` | Slow I/O threshold | 500 |
 | `--save-profile <path>` | Save raw CPU profile to file | — |
+| `--no-io` | Disable async I/O tracking | false |
 | `-j, --json` | Output as JSON | false |
 | `-w, --watch` | Continuous monitoring | false |
 

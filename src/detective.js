@@ -507,7 +507,9 @@ class Detective extends EventEmitter {
   async _singleRun() {
     try {
       await this._startLagDetection();
-      await this._startAsyncIOTracking();
+      if (!this.config.noIO) {
+        await this._startAsyncIOTracking();
+      }
 
       const profile = await this._captureProfile(this.config.duration);
       const analysis = this.analyzer.analyzeProfile(profile);
@@ -523,7 +525,9 @@ class Detective extends EventEmitter {
    */
   async _watchMode() {
     await this._startLagDetection();
-    await this._startAsyncIOTracking();
+    if (!this.config.noIO) {
+      await this._startAsyncIOTracking();
+    }
 
     const runCycle = async () => {
       if (!this._running) return;
