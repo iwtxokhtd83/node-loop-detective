@@ -93,6 +93,9 @@ loop-detective --port 9229 --list-targets
 
 # Profile a specific worker thread
 loop-detective --port 9229 --target 1
+
+# Generate HTML report
+loop-detective -p 12345 --html report.html
 ```
 
 ## Options
@@ -110,6 +113,7 @@ loop-detective --port 9229 --target 1
 | `--no-io` | Disable async I/O tracking | false |
 | `--list-targets` | List available inspector targets and exit | — |
 | `--target <index>` | Connect to a specific target (worker thread) | 0 |
+| `--html <path>` | Generate self-contained HTML report | — |
 | `-j, --json` | Output as JSON | false |
 | `-w, --watch` | Continuous monitoring | false |
 

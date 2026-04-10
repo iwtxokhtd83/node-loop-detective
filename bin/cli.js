@@ -4,6 +4,7 @@
 
 const { Detective } = require('../src/detective');
 const { Reporter } = require('../src/reporter');
+const { generateHtmlReport } = require('../src/html-report');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -22,6 +23,7 @@ function parseCliArgs(argv) {
     'no-io': false,
     'list-targets': false,
     target: null,
+    html: null,
     json: false,
     watch: false,
     help: false,
@@ -39,6 +41,7 @@ function parseCliArgs(argv) {
     '--io-threshold': 'io-threshold',
     '--save-profile': 'save-profile',
     '--target': 'target',
+    '--html': 'html',
   };
   const boolMap = {
     '-j': 'json', '--json': 'json',
@@ -113,6 +116,7 @@ function printUsage() {
     --no-io                  Disable async I/O tracking
     --list-targets           List available inspector targets and exit
     --target <index>         Connect to a specific target (default: 0)
+    --html <path>            Generate self-contained HTML report
     -j, --json               Output results as JSON
     -w, --watch              Continuous monitoring mode
     -h, --help               Show this help
@@ -148,6 +152,7 @@ async function main() {
     saveProfile: values['save-profile'],
     noIO: values['no-io'],
     targetIndex: values.target ? parseInt(values.target, 10) : 0,
+    html: values.html,
     watch: values.watch,
     json: values.json,
   };
@@ -192,6 +197,10 @@ async function main() {
   detective.on('lag', (data) => reporter.onLag(data));
   detective.on('slowIO', (data) => reporter.onSlowIO(data));
   detective.on('profile', (analysis, rawProfile) => {
+    // Capture events before onProfile clears them
+    const capturedLags = [...reporter.lagEvents];
+    const capturedIO = [...reporter.slowIOEvents];
+
     reporter.onProfile(analysis);
 
     // Save raw CPU profile if requested
@@ -200,12 +209,30 @@ async function main() {
         const filePath = path.resolve(config.saveProfile);
         fs.writeFileSync(filePath, JSON.stringify(rawProfile));
         if (!config.json) {
-          console.log(`\n  \x1b[32m✔\x1b[0m CPU profile saved to ${filePath}`);
-          console.log(`    Open in Chrome DevTools: Performance tab → Load profile`);
-          console.log(`    Or visit https://www.speedscope.app\n`);
+          console.log('\n  \x1b[32m\u2714\x1b[0m CPU profile saved to ' + filePath);
+          console.log('    Open in Chrome DevTools: Performance tab \u2192 Load profile');
+          console.log('    Or visit https://www.speedscope.app\n');
         }
       } catch (err) {
-        console.error(`\n  \x1b[31m✖ Failed to save profile: ${err.message}\x1b[0m\n`);
+        console.error('\n  \x1b[31m\u2716 Failed to save profile: ' + err.message + '\x1b[0m\n');
+      }
+    }
+
+    // Generate HTML report if requested
+    if (config.html) {
+      try {
+        const htmlPath = path.resolve(config.html);
+        const html = generateHtmlReport({
+          analysis, lagEvents: capturedLags, slowIOEvents: capturedIO,
+          config, timestamp: analysis.timestamp,
+        });
+        fs.writeFileSync(htmlPath, html);
+        if (!config.json) {
+          console.log('\n  \x1b[32m\u2714\x1b[0m HTML report saved to ' + htmlPath);
+          console.log('    Open in any browser to view the interactive report\n');
+        }
+      } catch (err) {
+        console.error('\n  \x1b[31m\u2716 Failed to save HTML report: ' + err.message + '\x1b[0m\n');
       }
     }
   });
