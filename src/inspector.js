@@ -5,39 +5,37 @@ const WebSocket = require('ws');
 const { EventEmitter } = require('node:events');
 
 class Inspector extends EventEmitter {
-  constructor({ host = '127.0.0.1', port = 9229 } = {}) {
+  constructor({ host = '127.0.0.1', port = 9229, targetIndex = 0 } = {}) {
     super();
     this.host = host;
     this.port = port;
+    this.targetIndex = targetIndex;
     this.ws = null;
     this._id = 0;
     this._callbacks = new Map();
   }
 
   /**
-   * Discover the inspector WebSocket URL via /json/list
+   * Fetch all available inspector targets via /json/list
    */
-  async getWebSocketUrl() {
+  async getTargets() {
     return new Promise((resolve, reject) => {
-      const req = http.get(`http://${this.host}:${this.port}/json/list`, (res) => {
+      const req = http.get('http://' + this.host + ':' + this.port + '/json/list', (res) => {
         let data = '';
         res.on('data', (chunk) => (data += chunk));
         res.on('end', () => {
           try {
             const targets = JSON.parse(data);
-            if (targets.length === 0) {
-              return reject(new Error('No inspector targets found'));
-            }
-            resolve(targets[0].webSocketDebuggerUrl);
+            resolve(targets);
           } catch (e) {
-            reject(new Error(`Failed to parse inspector response: ${e.message}`));
+            reject(new Error('Failed to parse inspector response: ' + e.message));
           }
         });
       });
       req.on('error', (err) => {
         reject(new Error(
-          `Cannot connect to inspector at ${this.host}:${this.port}. ` +
-          `Is the Node.js inspector active? (${err.message})`
+          'Cannot connect to inspector at ' + this.host + ':' + this.port + '. ' +
+          'Is the Node.js inspector active? (' + err.message + ')'
         ));
       });
       req.setTimeout(5000, () => {
@@ -45,6 +43,23 @@ class Inspector extends EventEmitter {
         reject(new Error('Timeout connecting to inspector'));
       });
     });
+  }
+
+  /**
+   * Discover the inspector WebSocket URL via /json/list
+   */
+  async getWebSocketUrl() {
+    const targets = await this.getTargets();
+    if (targets.length === 0) {
+      throw new Error('No inspector targets found');
+    }
+    if (this.targetIndex >= targets.length) {
+      throw new Error(
+        'Target index ' + this.targetIndex + ' out of range. ' +
+        'Available targets: 0-' + (targets.length - 1) + ' (' + targets.length + ' total)'
+      );
+    }
+    return targets[this.targetIndex].webSocketDebuggerUrl;
   }
 
   /**

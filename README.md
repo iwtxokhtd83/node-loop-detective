@@ -87,6 +87,12 @@ loop-detective -p 12345 --watch
 
 # JSON output (for piping to other tools)
 loop-detective -p 12345 --json
+
+# List available targets (main thread + worker threads)
+loop-detective --port 9229 --list-targets
+
+# Profile a specific worker thread
+loop-detective --port 9229 --target 1
 ```
 
 ## Options
@@ -102,6 +108,8 @@ loop-detective -p 12345 --json
 | `--io-threshold <ms>` | Slow I/O threshold | 500 |
 | `--save-profile <path>` | Save raw CPU profile to file | — |
 | `--no-io` | Disable async I/O tracking | false |
+| `--list-targets` | List available inspector targets and exit | — |
+| `--target <index>` | Connect to a specific target (worker thread) | 0 |
 | `-j, --json` | Output as JSON | false |
 | `-w, --watch` | Continuous monitoring | false |
 

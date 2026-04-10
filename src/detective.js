@@ -52,19 +52,56 @@ class Detective extends EventEmitter {
   }
 
   /**
-   * Connect to the inspector with exponential backoff retry.
-   * After SIGUSR1, the inspector may take a moment to start.
-   * Instead of a fixed 1-second wait, we retry up to maxRetries times
-   * with increasing delays: 500ms, 1000ms, 2000ms, 4000ms, 4000ms.
+   * List all available inspector targets (main thread + worker threads)
    */
-  async _connectWithRetry(host, port) {
+  async listTargets() {
+    this._activateInspector();
+    const port = this._getInspectorPort();
+    const host = this.config.inspectorHost || '127.0.0.1';
+
+    // Use retry logic to wait for inspector to start
     const maxRetries = this.config.inspectorPort ? 1 : 5;
     const baseDelay = 500;
     const maxDelay = 4000;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        this.inspector = new Inspector({ host, port });
+        const inspector = new Inspector({ host, port });
+        const targets = await inspector.getTargets();
+        return targets.map((t, i) => ({
+          index: i,
+          id: t.id,
+          title: t.title || '',
+          url: t.url || '',
+          type: t.type || 'node',
+          webSocketDebuggerUrl: t.webSocketDebuggerUrl,
+        }));
+      } catch (err) {
+        if (attempt === maxRetries) {
+          throw new Error(
+            'Failed to list targets at ' + host + ':' + port + ' after ' + maxRetries + ' attempts. ' +
+            'Last error: ' + err.message
+          );
+        }
+        const delay = Math.min(baseDelay * Math.pow(2, attempt - 1), maxDelay);
+        this.emit('retry', { attempt, maxRetries, delay, error: err.message });
+        await this._sleep(delay);
+      }
+    }
+  }
+
+  /**
+   * Connect to the inspector with exponential backoff retry.
+   */
+  async _connectWithRetry(host, port) {
+    const maxRetries = this.config.inspectorPort ? 1 : 5;
+    const baseDelay = 500;
+    const maxDelay = 4000;
+    const targetIndex = this.config.targetIndex || 0;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        this.inspector = new Inspector({ host, port, targetIndex });
 
         // Listen for unexpected disconnect (target process exit)
         this.inspector.on('disconnected', () => {

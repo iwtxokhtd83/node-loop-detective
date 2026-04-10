@@ -20,6 +20,8 @@ function parseCliArgs(argv) {
     'io-threshold': '500',
     'save-profile': null,
     'no-io': false,
+    'list-targets': false,
+    target: null,
     json: false,
     watch: false,
     help: false,
@@ -36,11 +38,13 @@ function parseCliArgs(argv) {
     '-i': 'interval', '--interval': 'interval',
     '--io-threshold': 'io-threshold',
     '--save-profile': 'save-profile',
+    '--target': 'target',
   };
   const boolMap = {
     '-j': 'json', '--json': 'json',
     '-w': 'watch', '--watch': 'watch',
     '--no-io': 'no-io',
+    '--list-targets': 'list-targets',
     '-h': 'help', '--help': 'help',
     '-v': 'version', '--version': 'version',
   };
@@ -80,9 +84,11 @@ const pid = values.pid || positionals[0];
 const inspectorPort = values.port ? parseInt(values.port, 10) : null;
 
 if (!pid && !inspectorPort) {
-  console.error('Error: Please provide a target PID or --port\n');
-  printUsage();
-  process.exit(1);
+  if (!values['list-targets']) {
+    console.error('Error: Please provide a target PID or --port\n');
+    printUsage();
+    process.exit(1);
+  }
 }
 
 function printUsage() {
@@ -105,6 +111,8 @@ function printUsage() {
     --io-threshold <ms>      Slow I/O threshold in ms (default: 500)
     --save-profile <path>    Save raw CPU profile to .cpuprofile file
     --no-io                  Disable async I/O tracking
+    --list-targets           List available inspector targets and exit
+    --target <index>         Connect to a specific target (default: 0)
     -j, --json               Output results as JSON
     -w, --watch              Continuous monitoring mode
     -h, --help               Show this help
@@ -116,6 +124,8 @@ function printUsage() {
     loop-detective --port 9229 --watch
     loop-detective --host 192.168.1.100 --port 9229
     loop-detective -p 12345 -d 5 -j
+    loop-detective --port 9229 --list-targets
+    loop-detective --port 9229 --target 1
 
   HOW IT WORKS
     1. Sends SIGUSR1 to activate the Node.js inspector (or connects to --port)
@@ -137,12 +147,38 @@ async function main() {
     ioThreshold: parseInt(values['io-threshold'], 10),
     saveProfile: values['save-profile'],
     noIO: values['no-io'],
+    targetIndex: values.target ? parseInt(values.target, 10) : 0,
     watch: values.watch,
     json: values.json,
   };
 
   const reporter = new Reporter(config);
   const detective = new Detective(config);
+
+  // Handle --list-targets: list and exit
+  if (values['list-targets']) {
+    try {
+      detective.on('retry', (data) => {
+        console.log('  Connecting... attempt ' + data.attempt + '/' + data.maxRetries);
+      });
+      const targets = await detective.listTargets();
+      if (config.json) {
+        console.log(JSON.stringify(targets, null, 2));
+      } else {
+        console.log('\n  Available inspector targets:\n');
+        for (const t of targets) {
+          const label = t.title || t.url || 'untitled';
+          console.log('  [' + t.index + '] ' + label);
+          if (t.url) console.log('      ' + t.url);
+        }
+        console.log('\n  Use --target <index> to connect to a specific target.\n');
+      }
+    } catch (err) {
+      console.error('\n  \x1b[31m✖ ' + err.message + '\x1b[0m\n');
+      process.exit(1);
+    }
+    process.exit(0);
+  }
 
   // Security warning for remote connections
   if (config.inspectorHost !== '127.0.0.1' && config.inspectorHost !== 'localhost') {
