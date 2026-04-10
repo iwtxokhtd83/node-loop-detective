@@ -46,10 +46,58 @@ class Detective extends EventEmitter {
   /**
    * Discover which port the inspector opened on
    */
-  async _findInspectorPort() {
+  _getInspectorPort() {
     if (this.config.inspectorPort) return this.config.inspectorPort;
-    await this._sleep(1000);
-    return 9229;
+    return 9229; // Node.js default
+  }
+
+  /**
+   * Connect to the inspector with exponential backoff retry.
+   * After SIGUSR1, the inspector may take a moment to start.
+   * Instead of a fixed 1-second wait, we retry up to maxRetries times
+   * with increasing delays: 500ms, 1000ms, 2000ms, 4000ms, 4000ms.
+   */
+  async _connectWithRetry(host, port) {
+    const maxRetries = this.config.inspectorPort ? 1 : 5;
+    const baseDelay = 500;
+    const maxDelay = 4000;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        this.inspector = new Inspector({ host, port });
+
+        // Listen for unexpected disconnect (target process exit)
+        this.inspector.on('disconnected', () => {
+          if (!this._stopping) {
+            this._targetExited = true;
+            const pid = this.config.pid || 'unknown';
+            this.emit('targetExit', { pid, message: `Target process (PID ${pid}) exited during profiling` });
+            if (this._sleepReject) {
+              this._sleepReject(new Error('Target process exited'));
+              this._sleepReject = null;
+            }
+          }
+        });
+
+        await this.inspector.connect();
+        return; // success
+      } catch (err) {
+        if (attempt === maxRetries) {
+          throw new Error(
+            `Failed to connect to inspector at ${host}:${port} after ${maxRetries} attempts. ` +
+            `Last error: ${err.message}`
+          );
+        }
+        // Clean up failed inspector
+        if (this.inspector) {
+          this.inspector.removeAllListeners();
+          this.inspector = null;
+        }
+        const delay = Math.min(baseDelay * Math.pow(2, attempt - 1), maxDelay);
+        this.emit('retry', { attempt, maxRetries, delay, error: err.message });
+        await this._sleep(delay);
+      }
+    }
   }
 
   /**
@@ -504,25 +552,10 @@ class Detective extends EventEmitter {
     this._targetExited = false;
 
     this._activateInspector();
-    const port = await this._findInspectorPort();
+    const port = this._getInspectorPort();
+    const host = this.config.inspectorHost || '127.0.0.1';
 
-    this.inspector = new Inspector({ host: this.config.inspectorHost, port });
-
-    // Listen for unexpected disconnect (target process exit)
-    this.inspector.on('disconnected', () => {
-      if (!this._stopping) {
-        this._targetExited = true;
-        const pid = this.config.pid || 'unknown';
-        this.emit('targetExit', { pid, message: `Target process (PID ${pid}) exited during profiling` });
-        // Cancel any pending sleep so _captureProfile can finish
-        if (this._sleepReject) {
-          this._sleepReject(new Error('Target process exited'));
-          this._sleepReject = null;
-        }
-      }
-    });
-
-    await this.inspector.connect();
+    await this._connectWithRetry(host, port);
     this.emit('connected');
 
     if (this.config.watch) {

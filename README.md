@@ -46,7 +46,7 @@ $ loop-detective 12345
 ## How It Works
 
 1. Sends `SIGUSR1` to activate the Node.js built-in inspector (or connects to `--port`)
-2. Connects via Chrome DevTools Protocol (CDP)
+2. Connects via Chrome DevTools Protocol (CDP) with automatic retry and exponential backoff
 3. Injects a lightweight event loop lag monitor
 4. Tracks slow async I/O (HTTP, DNS, TCP, fetch) via monkey-patching
 5. Captures a CPU profile to identify blocking code

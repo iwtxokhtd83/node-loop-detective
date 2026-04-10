@@ -150,6 +150,9 @@ async function main() {
   }
 
   detective.on('connected', () => reporter.onConnected());
+  detective.on('retry', (data) => {
+    reporter.onInfo('  Connecting to inspector... attempt ' + data.attempt + '/' + data.maxRetries + ' (retry in ' + data.delay + 'ms)');
+  });
   detective.on('lag', (data) => reporter.onLag(data));
   detective.on('slowIO', (data) => reporter.onSlowIO(data));
   detective.on('profile', (analysis, rawProfile) => {
