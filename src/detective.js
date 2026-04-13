@@ -537,6 +537,41 @@ class Detective extends EventEmitter {
   }
 
   /**
+   * Capture a V8 heap snapshot via CDP HeapProfiler.
+   * Returns the snapshot as a string (JSON format, can be large).
+   */
+  async captureHeapSnapshot() {
+    let chunks = [];
+    const onChunk = (msg) => {
+      if (msg.method === 'HeapProfiler.addHeapSnapshotChunk') {
+        chunks.push(msg.params.chunk);
+      }
+    };
+    this.inspector.on('event', onChunk);
+
+    try {
+      await this.inspector.send('HeapProfiler.enable');
+      await this.inspector.send('HeapProfiler.takeHeapSnapshot', { reportProgress: false });
+      await this.inspector.send('HeapProfiler.disable');
+    } finally {
+      this.inspector.removeListener('event', onChunk);
+    }
+
+    return chunks.join('');
+  }
+
+  /**
+   * Get quick heap usage stats via Runtime.evaluate calling process.memoryUsage().
+   */
+  async getHeapStats() {
+    const result = await this.inspector.send('Runtime.evaluate', {
+      expression: '(function(){ const m = process.memoryUsage(); return { rss: m.rss, heapTotal: m.heapTotal, heapUsed: m.heapUsed, external: m.external, arrayBuffers: m.arrayBuffers || 0 }; })()',
+      returnByValue: true,
+    });
+    return result.result?.value || null;
+  }
+
+  /**
    * Take a CPU profile to identify blocking code.
    * If the target exits during profiling, attempts to return null
    * so callers can handle the partial-data case.
@@ -604,6 +639,10 @@ class Detective extends EventEmitter {
 
   async _singleRun() {
     try {
+      // Capture heap stats at start
+      let heapBefore = null;
+      try { heapBefore = await this.getHeapStats(); } catch { /* non-fatal */ }
+
       await this._startLagDetection();
       if (!this.config.noIO) {
         await this._startAsyncIOTracking();
@@ -611,11 +650,18 @@ class Detective extends EventEmitter {
 
       const profile = await this._captureProfile(this.config.duration);
 
+      // Capture heap stats at end
+      let heapAfter = null;
+      try { heapAfter = await this.getHeapStats(); } catch { /* non-fatal */ }
+
+      if (heapBefore || heapAfter) {
+        this.emit('heapStats', { before: heapBefore, after: heapAfter });
+      }
+
       if (profile) {
         const analysis = this.analyzer.analyzeProfile(profile);
         this.emit('profile', analysis, profile);
       }
-      // If profile is null, target exited — targetExit event already emitted
     } finally {
       await this.stop();
     }

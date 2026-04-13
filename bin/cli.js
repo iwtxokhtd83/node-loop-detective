@@ -24,6 +24,8 @@ function parseCliArgs(argv) {
     'list-targets': false,
     target: null,
     html: null,
+    'heap-snapshot': null,
+    'heap-stats': false,
     json: false,
     watch: false,
     help: false,
@@ -42,12 +44,14 @@ function parseCliArgs(argv) {
     '--save-profile': 'save-profile',
     '--target': 'target',
     '--html': 'html',
+    '--heap-snapshot': 'heap-snapshot',
   };
   const boolMap = {
     '-j': 'json', '--json': 'json',
     '-w': 'watch', '--watch': 'watch',
     '--no-io': 'no-io',
     '--list-targets': 'list-targets',
+    '--heap-stats': 'heap-stats',
     '-h': 'help', '--help': 'help',
     '-v': 'version', '--version': 'version',
   };
@@ -117,6 +121,8 @@ function printUsage() {
     --list-targets           List available inspector targets and exit
     --target <index>         Connect to a specific target (default: 0)
     --html <path>            Generate self-contained HTML report
+    --heap-snapshot <path>   Save V8 heap snapshot (.heapsnapshot)
+    --heap-stats             Show memory usage before and after profiling
     -j, --json               Output results as JSON
     -w, --watch              Continuous monitoring mode
     -h, --help               Show this help
@@ -153,6 +159,8 @@ async function main() {
     noIO: values['no-io'],
     targetIndex: values.target ? parseInt(values.target, 10) : 0,
     html: values.html,
+    heapSnapshot: values['heap-snapshot'],
+    heapStats: values['heap-stats'],
     watch: values.watch,
     json: values.json,
   };
@@ -196,6 +204,30 @@ async function main() {
   });
   detective.on('lag', (data) => reporter.onLag(data));
   detective.on('slowIO', (data) => reporter.onSlowIO(data));
+
+  // Handle heap stats display
+  detective.on('heapStats', (data) => {
+    if (config.json) return; // included in profile JSON
+    if (!config.heapStats && !config.heapSnapshot) return;
+    const fmt = (bytes) => (bytes / 1024 / 1024).toFixed(1) + 'MB';
+    console.log('');
+    if (data.before) {
+      console.log('  \x1b[1mMemory (before profiling)\x1b[0m');
+      console.log('    RSS: ' + fmt(data.before.rss) + '  Heap: ' + fmt(data.before.heapUsed) + ' / ' + fmt(data.before.heapTotal) + '  External: ' + fmt(data.before.external));
+    }
+    if (data.after) {
+      console.log('  \x1b[1mMemory (after profiling)\x1b[0m');
+      console.log('    RSS: ' + fmt(data.after.rss) + '  Heap: ' + fmt(data.after.heapUsed) + ' / ' + fmt(data.after.heapTotal) + '  External: ' + fmt(data.after.external));
+    }
+    if (data.before && data.after) {
+      const heapGrowth = data.after.heapUsed - data.before.heapUsed;
+      const rssGrowth = data.after.rss - data.before.rss;
+      const color = heapGrowth > 10 * 1024 * 1024 ? '\x1b[31m' : heapGrowth > 1024 * 1024 ? '\x1b[33m' : '\x1b[32m';
+      console.log('  \x1b[1mMemory delta\x1b[0m');
+      console.log('    ' + color + 'Heap: ' + (heapGrowth >= 0 ? '+' : '') + fmt(heapGrowth) + '  RSS: ' + (rssGrowth >= 0 ? '+' : '') + fmt(rssGrowth) + '\x1b[0m');
+    }
+  });
+
   detective.on('profile', (analysis, rawProfile) => {
     // Capture events before onProfile clears them
     const capturedLags = [...reporter.lagEvents];
@@ -233,6 +265,25 @@ async function main() {
         }
       } catch (err) {
         console.error('\n  \x1b[31m\u2716 Failed to save HTML report: ' + err.message + '\x1b[0m\n');
+      }
+    }
+
+    // Capture heap snapshot if requested (after profile, before disconnect)
+    if (config.heapSnapshot) {
+      try {
+        if (!config.json) {
+          console.log('  \x1b[2mCapturing heap snapshot (this may take a moment)...\x1b[0m');
+        }
+        const snapshot = await detective.captureHeapSnapshot();
+        const snapPath = path.resolve(config.heapSnapshot);
+        fs.writeFileSync(snapPath, snapshot);
+        if (!config.json) {
+          const sizeMB = (Buffer.byteLength(snapshot) / 1024 / 1024).toFixed(1);
+          console.log('\n  \x1b[32m\u2714\x1b[0m Heap snapshot saved to ' + snapPath + ' (' + sizeMB + 'MB)');
+          console.log('    Open in Chrome DevTools: Memory tab \u2192 Load\n');
+        }
+      } catch (err) {
+        console.error('\n  \x1b[31m\u2716 Failed to save heap snapshot: ' + err.message + '\x1b[0m\n');
       }
     }
   });

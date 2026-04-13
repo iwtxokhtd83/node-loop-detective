@@ -82,6 +82,12 @@ loop-detective --host 192.168.1.100 --port 9229
 # Save raw CPU profile for Chrome DevTools / speedscope
 loop-detective -p 12345 --save-profile ./profile.cpuprofile
 
+# Capture heap snapshot for memory analysis
+loop-detective -p 12345 --heap-snapshot ./heap.heapsnapshot
+
+# Show memory usage before and after profiling
+loop-detective -p 12345 --heap-stats
+
 # Continuous monitoring mode
 loop-detective -p 12345 --watch
 
@@ -114,6 +120,8 @@ loop-detective -p 12345 --html report.html
 | `--list-targets` | List available inspector targets and exit | — |
 | `--target <index>` | Connect to a specific target (worker thread) | 0 |
 | `--html <path>` | Generate self-contained HTML report | — |
+| `--heap-snapshot <path>` | Save V8 heap snapshot (.heapsnapshot) | — |
+| `--heap-stats` | Show memory usage before/after profiling | false |
 | `-j, --json` | Output as JSON | false |
 | `-w, --watch` | Continuous monitoring | false |
 
