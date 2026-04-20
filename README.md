@@ -88,6 +88,11 @@ loop-detective -p 12345 --heap-snapshot ./heap.heapsnapshot
 # Show memory usage before and after profiling
 loop-detective -p 12345 --heap-stats
 
+# Compare with a previous profiling report
+loop-detective -p 12345 --json > before.json
+# ... make changes, then:
+loop-detective -p 12345 --compare before.json
+
 # Continuous monitoring mode
 loop-detective -p 12345 --watch
 
@@ -122,6 +127,7 @@ loop-detective -p 12345 --html report.html
 | `--html <path>` | Generate self-contained HTML report | — |
 | `--heap-snapshot <path>` | Save V8 heap snapshot (.heapsnapshot) | — |
 | `--heap-stats` | Show memory usage before/after profiling | false |
+| `--compare <path>` | Compare with a previous JSON report | — |
 | `-j, --json` | Output as JSON | false |
 | `-w, --watch` | Continuous monitoring | false |
 

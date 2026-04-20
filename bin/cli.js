@@ -5,6 +5,7 @@
 const { Detective } = require('../src/detective');
 const { Reporter } = require('../src/reporter');
 const { generateHtmlReport } = require('../src/html-report');
+const { compareReports, formatComparison } = require('../src/comparator');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -26,6 +27,7 @@ function parseCliArgs(argv) {
     html: null,
     'heap-snapshot': null,
     'heap-stats': false,
+    compare: null,
     json: false,
     watch: false,
     help: false,
@@ -45,6 +47,7 @@ function parseCliArgs(argv) {
     '--target': 'target',
     '--html': 'html',
     '--heap-snapshot': 'heap-snapshot',
+    '--compare': 'compare',
   };
   const boolMap = {
     '-j': 'json', '--json': 'json',
@@ -123,6 +126,7 @@ function printUsage() {
     --html <path>            Generate self-contained HTML report
     --heap-snapshot <path>   Save V8 heap snapshot (.heapsnapshot)
     --heap-stats             Show memory usage before and after profiling
+    --compare <path>         Compare with a previous JSON report
     -j, --json               Output results as JSON
     -w, --watch              Continuous monitoring mode
     -h, --help               Show this help
@@ -161,6 +165,7 @@ async function main() {
     html: values.html,
     heapSnapshot: values['heap-snapshot'],
     heapStats: values['heap-stats'],
+    compare: values.compare,
     watch: values.watch,
     json: values.json,
   };
@@ -284,6 +289,23 @@ async function main() {
         }
       } catch (err) {
         console.error('\n  \x1b[31m\u2716 Failed to save heap snapshot: ' + err.message + '\x1b[0m\n');
+      }
+    }
+
+    // Compare with baseline if requested
+    if (config.compare) {
+      try {
+        const baselinePath = path.resolve(config.compare);
+        const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+        const currentReport = { ...analysis, lagEvents: capturedLags, slowIOEvents: capturedIO };
+        const diff = compareReports(baseline, currentReport);
+        if (config.json) {
+          console.log(JSON.stringify({ comparison: diff }, null, 2));
+        } else {
+          console.log(formatComparison(diff));
+        }
+      } catch (err) {
+        console.error('\n  \x1b[31m\u2716 Failed to compare: ' + err.message + '\x1b[0m\n');
       }
     }
   });
