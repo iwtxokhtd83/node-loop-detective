@@ -1,6 +1,6 @@
 {
   "name": "node-loop-detective",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "Detect event loop blocking & lag in running Node.js apps without code changes or restarts",
   "main": "src/index.js",
   "bin": {

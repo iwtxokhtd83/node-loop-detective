@@ -233,7 +233,7 @@ async function main() {
     }
   });
 
-  detective.on('profile', (analysis, rawProfile) => {
+  detective.on('profile', async (analysis, rawProfile) => {
     // Capture events before onProfile clears them
     const capturedLags = [...reporter.lagEvents];
     const capturedIO = [...reporter.slowIOEvents];
